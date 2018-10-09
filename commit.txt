@@ -1,0 +1,11 @@
+commit c3a01c33c9d0dbe11a364278594ebf299082f451
+Author: Isaac <isaac@ceo.do>
+Date:   Tue Oct 9 15:59:16 2018 -0400
+
+    *cambiando*
+
+commit 01645341cd7be642c54e72c49397162deaba3ce5
+Author: Isaac <isaac@ceo.do>
+Date:   Tue Oct 9 15:50:06 2018 -0400
+
+    *iniciemos*
