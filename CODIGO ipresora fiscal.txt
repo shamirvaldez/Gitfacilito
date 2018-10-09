@@ -1,0 +1,1676 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Data.SqlClient;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+using Microsoft.Win32;
+using System.Collections;
+using System.Text.RegularExpressions;
+using System.Net;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+
+namespace ImpresoraFiscal
+{
+
+    public partial class FrmPF : Form
+    {
+        
+        private string strLogFile = "";
+        public Hashtable htConfig = new Hashtable();
+        private ImpresoraFiscal oImpFiscal;
+        private RegistryKey rk;
+        FileSystemWatcher watcher;
+        
+        [DllImport("TaurusInterface.dll", EntryPoint = "verificarConexion")]
+        private static extern bool verificarConexion(string puertoConexion);
+
+        [DllImport("TaurusInterface.dll", EntryPoint = "LeerLibroMensual")]
+        private static extern bool LeerLibroMensual(string FechaDesde, string FechaHasta, string NombreArchivoSalida, string Extension);
+
+        [DllImport("TaurusInterface.dll", EntryPoint = "LeerLibroDiario")]
+        private static extern bool LeerLibroDiario(string Fecha, string NombreArchivoSalida, string Extension);
+
+        [DllImport("TaurusInterface.dll", EntryPoint = "GenerarLibroMensual")]
+        private static extern bool GenerarLibroMensual(string Directorio, string NombreArchivoSalida, string Extension);
+
+        public FrmPF()
+        {
+            InitializeComponent();
+            rk = Registry.CurrentUser.CreateSubKey("Software\\CEO.do\\ImpresoraFiscal");
+            //this.Hide();
+
+            buttonImpFiscConfigureHeader.Enabled = false;
+            GeneraLibro.Enabled = false;
+            DesLibro.Enabled = false;
+            try
+            {
+                
+                strLogFile = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData) + "\\CEO_Consultoría_SRL\\IFiscal\\";
+                System.IO.Directory.CreateDirectory(strLogFile);
+                strLogFile += "ImpresoraFiscal-" + DateTime.Now.ToString("yyyy-MM-dd HH-mm") + "-pid" + System.Diagnostics.Process.GetCurrentProcess().Id + ".txt";
+                WriteToLog("Impresora iniciando");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show( ex.Message);
+                //strLogFile = "";
+            }
+
+            DirectorioEntrada();
+            DirectorioSalida();
+          
+            
+            //try
+            //{
+            //    //textBoxUser.Text = rk.GetValue("UserName").ToString();
+            //    //selectScanner(new ToolStripButton(rk.GetValue("Scanner").ToString()), null);
+            //}
+            //catch (Exception)
+            //{
+            //}
+
+            //verificacion de carpeta
+            
+           
+
+
+            // buscar impresoras
+            foreach (string printerName in System.Drawing.Printing.PrinterSettings.InstalledPrinters)
+            {
+                comboBoxPrinterLabels.Items.Add(printerName);
+                comboBoxPrinterInvoice.Items.Add(printerName);
+                comboBoxPrinterDispatch.Items.Add(printerName);
+                comboBoxPrinterQuotation.Items.Add(printerName);
+            }
+            System.Drawing.Printing.PrinterSettings settings = new System.Drawing.Printing.PrinterSettings();
+            string labelPrinter, invoicePrinter, dispatchPrinter, quotationPrinter;
+            if (rk.GetValue("LabelPrinter") != null) labelPrinter = rk.GetValue("LabelPrinter").ToString(); else labelPrinter = settings.PrinterName;
+            if (rk.GetValue("InvoicePrinter") != null) invoicePrinter = rk.GetValue("InvoicePrinter").ToString(); else invoicePrinter = settings.PrinterName;
+            if (rk.GetValue("DispatchPrinter") != null) dispatchPrinter = rk.GetValue("DispatchPrinter").ToString(); else dispatchPrinter = settings.PrinterName;
+            if (rk.GetValue("QuotationPrinter") != null) quotationPrinter = rk.GetValue("QuotationPrinter").ToString(); else quotationPrinter = settings.PrinterName;
+            selectComboBoxItem(comboBoxPrinterLabels, labelPrinter);
+            selectComboBoxItem(comboBoxPrinterInvoice, invoicePrinter);
+            selectComboBoxItem(comboBoxPrinterDispatch, dispatchPrinter);
+            selectComboBoxItem(comboBoxPrinterQuotation, quotationPrinter);
+            if (rk.GetValue("PrintFormat") != null) selectComboBoxItem(comboBoxPrintFormat, rk.GetValue("PrintFormat").ToString()); else selectComboBoxItem(comboBoxPrintFormat, "ESC/POS");
+
+            // buscar puertos COM para impresora fiscal
+            foreach (string portName in System.IO.Ports.SerialPort.GetPortNames())
+                comboBoxComPort.Items.Add(portName);
+
+            if (comboBoxComPort.Items.Count > 0)
+                comboBoxComPort.SelectedIndex = 0;
+
+            if (rk.GetValue("ComPort") != null)
+                selectComboBoxItem(comboBoxComPort, rk.GetValue("ComPort").ToString());
+
+            // seleccionar velocidad de puerto COM
+            foreach (EpsonFPHostControlX.TxBaudRate rate in (EpsonFPHostControlX.TxBaudRate[])Enum.GetValues(typeof(EpsonFPHostControlX.TxBaudRate)))
+                comboBoxComSpeed.Items.Add(new MyComboBoxItem(rate, rate.ToString().Replace("br", "")));
+
+            if (comboBoxComSpeed.Items.Count > 0)
+                comboBoxComSpeed.SelectedIndex = 0;
+
+            if (rk.GetValue("ComSpeed") != null)
+                selectComboBoxItem(comboBoxComSpeed, rk.GetValue("ComSpeed").ToString());
+
+            comboBoxCajonDinero.Items.Clear();
+            comboBoxCajonDinero.Items.Add(new MyComboBoxItem(0, "No"));
+            comboBoxCajonDinero.Items.Add(new MyComboBoxItem(1, "Cajón 1"));
+            comboBoxCajonDinero.Items.Add(new MyComboBoxItem(2, "Cajón 2"));
+            comboBoxCajonDinero.Items.Add(new MyComboBoxItem(3, "Cajón 1 y 2 (más lento)"));
+            if (rk.GetValue("CajonDinero") != null)
+                selectComboBoxItem(comboBoxCajonDinero, rk.GetValue("CajonDinero").ToString(), true);
+
+
+            info();
+            //Imprimiendo();
+            //Watch();
+        }
+
+        public void info()
+        {
+            MessageBox.Show("Si han pasado mas de 24 horas, imprimir cierre Z", "Cierre jornada fiscal", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+        }
+
+        public void DirectorioEntrada()
+        {
+            try
+            {
+                //entrada de facturas fiscal
+                string path = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_IN\\";
+                Directory.CreateDirectory(path);
+
+
+
+            }
+            catch (Exception)
+            {
+
+                string path = "";
+            }
+        }
+
+        public void DirectorioSalida()
+        {
+            try
+            {
+                //salida  de facturas imprimida
+                string path1 = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_OUT\\";
+                Directory.CreateDirectory(path1);
+            }
+            catch (Exception)
+            {
+
+                string path1 = "";
+            }
+        }
+
+        public void Watch()
+        {
+            try
+            {
+                //carpeta de entrada 
+                string path = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_IN\\";
+                FileSystemWatcher watcher = new FileSystemWatcher();
+                watcher.Path = path;
+                watcher.NotifyFilter = NotifyFilters.LastWrite;
+                watcher.Filter = "*.txt";
+                watcher.Created += new FileSystemEventHandler(LLego);
+                watcher.Changed += new FileSystemEventHandler(cambio);
+                watcher.EnableRaisingEvents = true;
+              
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
+            
+        }
+
+        private  void LLego(object source, FileSystemEventArgs e)
+        {
+            WatcherChangeTypes wtc = e.ChangeType;
+            //MessageBox.Show("Test", "Testing");
+            Imprimiendo();
+        }
+
+        private void cambio(object source, FileSystemEventArgs e)
+        {
+            Imprimiendo();
+        }
+
+
+        //public void Mover(object source, FileSystemEventArgs e)
+        //{
+        //    WatcherChangeTypes wtc = e.ChangeType;
+        //    MessageBox.Show(e.FullPath, wtc.ToString());
+
+
+        //}
+
+        private void Imprimiendo()
+        {
+            //carpeta de entrada 
+            string path1 = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_IN\\";
+
+            //salida de facturas fiscal
+            string path = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_OUT\\";
+            path += "ImpresoraFiscal-" + DateTime.Now.ToString("yyyy-MM-dd HH-mm") + /*+ "-pid" + System.Diagnostics.Process.GetCurrentProcess().Id +*/ ".txt";
+
+
+            //string path = Path.GetExtension(path1);
+            //string path = @"C:\Users\ceodev\Documents\IPF\IPFISCAL_OUT\";
+
+
+            //DirectoryInfo Di = new DirectoryInfo(@"C:\Users\ceodev\Documents\IPF\IPFISCAL_IN\", "*.txt");
+            //string arc = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)) + "\\IPF\\IPFISCAL_IN\\";
+            string arch = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_IN\\ + ";
+
+
+            string[] archivos = Directory.GetFiles(path1);
+            //string[] archivos = Directory.GetFiles(@"C:\Users\ceodev\Documents\IPF\IPFISCAL_IN\", "*.txt");
+
+
+            foreach (string item in archivos)
+            {
+                string archivo = item;
+
+                if (archivo == null)
+
+                    MessageBox.Show("No existe factura para imprimir en la carpeta", "Error", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+
+
+                //string archivo = Path.GetExtension(path1);
+
+                //string Strget = Path.GetFileName(path);
+                if (File.Exists(archivo))
+                {
+                    //File.Move(path1, path);
+                    StreamReader sw = new StreamReader(archivo);
+                    string line = "";
+                    while (line != null)
+                    {
+                        line = sw.ReadLine();
+                        if (line != null)
+                        {
+                            string lineas = line;
+
+
+                            //string[] value = lineas.Split(',');
+                            Regex r = new Regex("^<([A-Z_]+)\\s*,?(.*)>$");
+                            if (!r.IsMatch(line))
+                                continue;
+
+                            MatchCollection mc = r.Matches(line);
+
+                            //string comando = r.Matches(line)[0].Groups[1].Value.Split(',');
+                            string comando = mc[0].Groups[1].Value;
+                            string[] parametros = mc[0].Groups[2].Value.Split(',');
+                            //string[] parametros = r.Matches(line)[0].Groups[1].Value.Split(',');
+                            switch (comando)
+                            {
+                                case "ABRIR_CF":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        switch (parametros[0])
+                                        {
+                                            case "0":
+                                                extension = "000";
+                                                break;
+                                            case "1":
+                                                extension = "001";
+                                                break;
+                                            case "2":
+                                                extension = "010";
+                                                break;
+                                            case "3":
+                                                extension = "011";
+                                                break;
+                                            case "4":
+                                                extension = "100";
+                                                break;
+                                            case "5":
+                                                extension = "101";
+                                                break;
+                                            case "6":
+                                                extension = "110";
+                                                break;
+                                            case "7":
+                                                extension = "111";
+                                                break;
+                                        }
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        int iCopias = 0;
+                                        int.TryParse(parametros[1], out iCopias);
+                                        extension = Convert.ToString(iCopias, 2).PadLeft(3, '0') + extension;
+                                        extension = extension.PadLeft(15, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+                                        string razon = parametros[6].Length < 20 ? parametros[6].Substring(0, parametros[6].Length) : parametros[6].Substring(0, 15);
+
+                                        oImpFiscal.Abrir("1001", extension, new string[] {
+                                        "",  // logo
+                                        "",             // densidad
+                                        parametros[3],  // sucursal
+                                        parametros[4],  // caja
+                                        parametros[5],  // NCF
+                                        razon,// Razon social
+                                        parametros[7],  // RNC
+                                        parametros[8],  // NCF referencia
+                                    });
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        //if (oImpFiscal == null)
+                                        //    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        //oImpFiscal.CancelarDocumento();
+
+                                    }
+                                    break;
+                                case "ITEM_CF":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        switch (parametros[0])
+                                        {
+                                            case "0":
+                                                extension = "000"; //item de venta 
+                                                break;
+                                            case "1":
+                                                extension = "001"; //anulacion de venta
+                                                break;
+                                            case "2":
+                                                extension = "010"; //Descuento por item
+                                                break;
+                                            case "3":
+                                                extension = "011"; //Recargo por item
+                                                break;
+                                            case "4":
+                                                extension = "100"; //item de retorno
+                                                break;
+                                            case "5":
+                                                extension = "101"; //anulacion de retorno
+                                                break;
+                                        }
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        extension = extension.PadLeft(16, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+                                        oImpFiscal.Item("1002", extension, new string[] {
+                                                                          parametros[1].Trim(),  // Descripcion adicional/extra 1
+                                                                          parametros[2].Trim(),  // Descripcion adicional/extra 2
+                                                                          parametros[3].Trim(),  // Descripcion adicional/extra 3
+                                                                          parametros[4].Trim(),  // Descripcion adicional/extra 4
+                                                                          parametros[5].Trim(),  // Descripcion adicional/extra 5
+                                                                          parametros[6].Trim(),  // Descripcion adicional/extra 6
+                                                                          parametros[7].Trim(),  // Descripcion adicional/extra 7
+                                                                          parametros[8],  // Descripcion adicional/extra 8
+                                                                          parametros[9].Trim(),  // Descripcion adicional/extra 9
+                                                                          parametros[10],  //Descripcion adicional/extra 10*/
+                                                                          parametros[11].Trim() + "0", // cantidad
+                                                                          parametros[12].Trim(),  //precio
+                                                                          parametros[13].Trim(),  //tasa
+                                                                       /* parametros[14], */ //tasa
+                                                                    });
+                                    }
+                                    //oImpFiscal.Item("1002", extension, new string[] {
+                                    //               "0",  // 1 Descripcion adicional 1
+                                    //                "2",  // 2 Descripcion adicional 2
+                                    //                "2",  // 3 Descripcion adicional 3
+                                    //               "1",  // 4 Descripcion adicional 4
+                                    //               "1",  // 5 Descripcion adicional 5
+                                    //                "2",  // 6 Descripcion adicional 6
+                                    //                "2",  // 7 Descripcion adicional 7
+                                    //                ////"2",  //  Descripcion adicional 8
+                                    //                "1",  // 8 Descripcion adicional 9
+                                    //                "2",  // 9 Descripcion item
+                                    //                "2",/* 10 parametros[11],*/  // Descripcion adiciona 1
+                                    //                "300", //11 cantidad
+                                    //                "2500",  //12 precio unitario
+                                    //                "0",  // 13 tasen de itbis
+                                    //            });
+                                    //}
+                                    catch (Exception ex)
+                                    {
+                                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                    }
+                                    break;
+
+                                case "SUBTOTAL_CF":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        extension = extension.PadLeft(16, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+
+
+                                        oImpFiscal.SubTotal("1003", extension);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                                        //if (oImpFiscal == null)
+                                        //    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        //oImpFiscal.CancelarDocumento();
+
+                                    }
+                                    break;
+
+                                case "DESC_REC_CF":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        switch (parametros[0])
+                                        {
+                                            case "0":
+                                                extension = "0";
+                                                break;
+                                            case "1":
+                                                extension = "1";
+                                                break;
+                                        }
+
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        extension = extension.PadLeft(15, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+                                        oImpFiscal.DescuentoRecargo("1004", extension, new string[] {
+                                                    parametros[1], //descripcion
+                                                    parametros[2],  //monto
+
+                                                    });
+
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        //MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        oImpFiscal.CancelarDocumento();
+                                    }
+                                    break;
+
+                                case "PAGO_CF":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        switch (parametros[0])
+                                        {
+                                            case "0":
+                                                extension = "0";
+                                                break;
+                                            case "1":
+                                                extension = "1";
+                                                break;
+                                        }
+
+                                        //switch (parametros[1])
+                                        //{
+                                        //    case "0":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "1":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "2":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "3":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "4":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "5":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "6":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+
+                                        //    case "7":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "8":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "9":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+                                        //    case "10":
+                                        //        extension = extension.PadLeft(15, '0');
+                                        //        break;
+
+
+                                        //}
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        extension = extension.PadLeft(15, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+                                        string pago = Math.Ceiling(decimal.Parse(parametros[2].ToString().Substring(0, parametros[2].Length - 2) + "." + parametros[2].Substring(parametros[2].Length - 2, 2))).ToString();
+
+                                        oImpFiscal.Pago("1005", extension, new string[] {
+                                            parametros[1],
+                                            pago.Length < parametros[2].Length ? pago +"00" :pago,   /* .Insert(3,"0")*/
+                                            parametros[3],
+                                            parametros[4],
+                                            parametros[5]});
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        //MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        oImpFiscal.CancelarDocumento();
+                                    }
+                                    break;
+
+                                case "CERRAR_CF":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        switch (parametros[0])
+                                        {
+                                            case "0":
+                                                extension = "0";
+                                                break;
+                                            case "1":
+                                                extension = "1";
+                                                break;
+                                        }
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        extension = extension.PadLeft(16, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+                                        oImpFiscal.Cerrar("1006", extension, new string[] {
+                                            parametros[1].Trim(), //Numero linea de reemplazo #1
+                                            parametros[2], //Descripcion de reemplazo 1
+                                            parametros[3].Trim(), //Numero linea de reemplazo 2
+                                            parametros[4], //Descripcion de reemplazo 2
+                                            parametros[5].Trim(), //numero linea de reemplazo 3
+                                            parametros[6], //Descripcion de reemplazo 3
+                                        });
+                                    }
+
+
+                                    //    oImpFiscal.Cerrar("1006", extension, new string[] {
+                                    //            "1",
+                                    //            "2",
+                                    //            "3",
+                                    //            "4",
+                                    //            "5",
+                                    //            "6",
+                                    //            });
+                                    //}
+                                    catch (Exception ex)
+                                    {
+                                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        oImpFiscal.CancelarDocumento();
+                                    };
+                                    break;
+                                case "REPORTE_Z":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        switch (parametros[0])
+                                        {
+                                            case "0":
+                                                extension = "0";
+                                                break;
+                                            case "1":
+                                                extension = "1";
+                                                break;
+
+                                            case "2":
+                                                extension = "2";
+                                                break;
+                                        }
+
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        extension = extension.PadLeft(15, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+                                        oImpFiscal.ReporteZ("0801", extension);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        //if (oImpFiscal == null)
+                                        //    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        //oImpFiscal.CancelarDocumento();
+                                    }
+                                    break;
+
+                            }
+
+
+                        }
+                    }
+                    sw.Close();
+                }
+
+
+                //move();
+                if (File.Exists(path))
+                {
+
+                    File.Delete(path);
+                }
+                else
+                {
+
+                    File.Move(archivo, path);
+
+                }
+
+            }
+        }
+        public void selectComboBoxItem(ComboBox cb, string selectedItem)
+        {
+            foreach (object item in cb.Items)
+            {
+                if (
+                    (item.GetType() == typeof(MyComboBoxItem) && ((MyComboBoxItem)item).Value.ToString() == selectedItem)
+                    ||
+                    item.ToString() == selectedItem
+                    )
+                {
+                    cb.SelectedItem = item;
+                    break;
+                }
+            }
+        }
+
+      
+   
+
+        private void selectComboBoxItem(ComboBox cb, string selectedItem, bool byValue)
+        {
+            foreach (object item in cb.Items)
+            {
+                if (((MyComboBoxItem)item).Value.ToString() == selectedItem)
+                {
+                    cb.SelectedItem = item;
+                    break;
+                }
+            }
+        }
+
+        public void WriteToLog(string message)
+        {
+            if (strLogFile == "")
+                return;
+            System.IO.File.AppendAllText(strLogFile, DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss") + ": " + message + "\r\n");
+        }
+
+
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                    oImpFiscal.CierreZ();
+                           
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error realizando cierre Z", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void buttonImpFiscPrintCierreZFecha_Click(object sender, EventArgs e)
+        {
+            if (oImpFiscal == null)
+                oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+            try
+            {
+                oImpFiscal.ZHistoricoFecha(dateTimePickerCierreZFrom.Value, dateTimePickerCierreZTo.Value);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "No pudo imprimir cierres Z por rango de fecha", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void buttonImpFiscCierreCajero_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                oImpFiscal.CierreCajero();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error realizando cierre de cajero", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void FrmPF_Load(object sender, EventArgs e)
+        {
+
+      
+
+
+
+        }
+
+        private void buttonImpFiscalRippleTest_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+
+                oImpFiscal.RippleTest();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error en Ripple Test", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void buttonImpFiscUpdateStatus_Click(object sender, EventArgs e)
+        {
+            if (oImpFiscal == null)
+                oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+            try
+            {
+                oImpFiscal.UpdatePrinterStatus();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
+        }
+
+        private void buttonImpFiscCancelar_Click(object sender, EventArgs e)
+        {
+            if (oImpFiscal == null)
+                oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+            try
+            {
+                oImpFiscal.CancelarDocumento();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error cancelando documento fiscal", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void timerlock_Tick(object sender, EventArgs e)
+        {
+            if (oImpFiscal != null)
+            {
+                string strStatus = oImpFiscal.GetFiscalStatus();
+
+                strStatus += "\r\n\r\n**************************\r\n\r\n";
+
+                strStatus += oImpFiscal.GetPrinterStatus();
+
+                //if (textBoxImpFiscEstadoFiscal.Text != strStatus)
+                //    textBoxImpFiscEstadoFiscal.Text = strStatus;
+            }
+        }
+
+        private void btnRespaldo_Click(object sender, EventArgs e)
+        {
+
+           
+            try
+            {
+                string fileName = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\CEO_Consultoría_SRL\\IPFISCAL_BACKUP\\";
+                fileName += "Respaldo" + DateTime.Now.ToString("yyyy-MM-dd HH-mm") + " " + ".txt";
+
+                if (System.IO.File.Exists(fileName))
+                {
+                    MessageBox.Show("Backup creado con éxito", "Backup", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show("El backup fue ejecutado con éxito, pero el archivo no está accesible desde esta computadora.", "Backup", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error realizando Backup", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
+
+            
+        }
+
+        private DateTime getServerDate()
+        {
+            return DateTime.Parse("yyyy-MM-dd hh-mm-ss");
+        }
+
+        private void tabPage1_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btnAbrir_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                //oImpFiscal.CrearFacturaFinal();
+
+
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void btnItem_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                //oImpFiscal.Item();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void bsubtotal_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                //oImpFiscal.SubTotal();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void btnDescuento_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                //oImpFiscal.DescuentoRecargo();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void btnPago_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                //oImpFiscal.Pago();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void button6_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (oImpFiscal == null)
+                    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                //oImpFiscal.Cerrar();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+      
+
+       
+        private void btnTesting_Click(object sender, EventArgs e)
+        {
+            //carpeta de entrada 
+            string path1 = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_IN\\";
+
+            //salida de facturas fiscal
+            string path = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_OUT\\";
+            path += "ImpresoraFiscal-" + DateTime.Now.ToString("yyyy-MM-dd HH-mm") + /*+ "-pid" + System.Diagnostics.Process.GetCurrentProcess().Id +*/ ".txt";
+
+
+            //string path = Path.GetExtension(path1);
+            //string path = @"C:\Users\ceodev\Documents\IPF\IPFISCAL_OUT\";
+
+
+            //DirectoryInfo Di = new DirectoryInfo(@"C:\Users\ceodev\Documents\IPF\IPFISCAL_IN\", "*.txt");
+            //string arc = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)) + "\\IPF\\IPFISCAL_IN\\";
+            string arch = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_IN\\ + ";
+
+
+            string[] archivos = Directory.GetFiles(path1);
+            //string[] archivos = Directory.GetFiles(@"C:\Users\ceodev\Documents\IPF\IPFISCAL_IN\", "*.txt");
+
+
+            foreach (string item in archivos)
+            {
+                string archivo = item;
+
+                if (archivo == null)
+
+                    MessageBox.Show("No existe factura para imprimir en la carpeta", "Error", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+
+
+                //string archivo = Path.GetExtension(path1);
+
+                //string Strget = Path.GetFileName(path);
+                if (File.Exists(archivo))
+            {
+                //File.Move(path1, path);
+                StreamReader sw = new StreamReader(archivo);
+                string line = "";
+                while (line != null)
+                {
+                    line = sw.ReadLine();
+                    if (line != null)
+                    {
+                        string lineas = line;
+                        
+                     
+                        //string[] value = lineas.Split(',');
+                        Regex r = new Regex("^<([A-Z_]+)\\s*,?(.*)>$");
+                        if (!r.IsMatch(line))
+                            continue;
+
+                        MatchCollection mc = r.Matches(line);
+
+                        //string comando = r.Matches(line)[0].Groups[1].Value.Split(',');
+                        string comando = mc[0].Groups[1].Value;
+                        string[] parametros = mc[0].Groups[2].Value.Split(',');
+                        //string[] parametros = r.Matches(line)[0].Groups[1].Value.Split(',');
+                        switch (comando)
+                        {
+                            case "ABRIR_CF":
+                                try
+                                {
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    string extension = "";
+                                    switch (parametros[0])
+                                    {
+                                        case "0":
+                                            extension = "000";
+                                            break;
+                                        case "1":
+                                            extension = "001";
+                                            break;
+                                        case "2":
+                                            extension = "010";
+                                            break;
+                                        case "3":
+                                            extension = "011";
+                                            break;
+                                        case "4":
+                                            extension = "100";
+                                            break;
+                                        case "5":
+                                            extension = "101";
+                                            break;
+                                        case "6":
+                                            extension = "110";
+                                            break;
+                                        case "7":
+                                            extension = "111";
+                                            break;
+                                    }
+                                    extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                    int iCopias = 0;
+                                    int.TryParse(parametros[1], out iCopias);
+                                    extension = Convert.ToString(iCopias, 2).PadLeft(3, '0') + extension;
+                                    extension = extension.PadLeft(15, '0');
+                                    extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+                                    string razon = parametros[6].Length < 20 ? parametros[6].Substring(0, parametros[6].Length) : parametros[6].Substring(0, 15);
+
+                                        oImpFiscal.Abrir("1001", extension, new string[] {
+                                        "",  // logo
+                                        "",             // densidad
+                                        parametros[3],  // sucursal
+                                        parametros[4],  // caja
+                                        parametros[5],  // NCF
+                                        razon/*parametros[6].Length.ToString()*/, // Razon social
+                                        parametros[7],  // RNC
+                                        parametros[8],  // NCF referencia
+                                    });
+                                }
+                                catch (Exception ex)
+                                {
+                                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        //if (oImpFiscal == null)
+                                        //    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        //oImpFiscal.CancelarDocumento();
+                                        
+                                }
+                                break;
+                            case "ITEM_CF":
+                                try
+                                {
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    string extension = "";
+                                    switch (parametros[0])
+                                    {
+                                        case "0":
+                                            extension = "000"; //item de venta 
+                                            break;
+                                        case "1":
+                                            extension = "001"; //anulacion de venta
+                                            break;
+                                        case "2":
+                                            extension = "010"; //Descuento por item
+                                            break;
+                                        case "3":
+                                            extension = "011"; //Recargo por item
+                                            break;
+                                        case "4":
+                                            extension = "100"; //item de retorno
+                                            break;
+                                        case "5":
+                                            extension = "101"; //anulacion de retorno
+                                            break;
+                                    }
+                                    extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                    extension = extension.PadLeft(16, '0');
+                                    extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+                                        oImpFiscal.Item("1002", extension, new string[] {
+                                                                          parametros[1].Trim(),  // Descripcion adicional/extra 1
+                                                                          parametros[2].Trim(),  // Descripcion adicional/extra 2
+                                                                          parametros[3].Trim(),  // Descripcion adicional/extra 3
+                                                                          parametros[4].Trim(),  // Descripcion adicional/extra 4
+                                                                          parametros[5].Trim(),  // Descripcion adicional/extra 5
+                                                                          parametros[6].Trim(),  // Descripcion adicional/extra 6
+                                                                          parametros[7].Trim(),  // Descripcion adicional/extra 7
+                                                                          parametros[8],  // Descripcion adicional/extra 8
+                                                                          parametros[9].Trim(),  // Descripcion adicional/extra 9
+                                                                          parametros[10],  //Descripcion adicional/extra 10*/
+                                                                          parametros[11].Trim() + "0", // cantidad
+                                                                          parametros[12].Trim(),  //precio
+                                                                          parametros[13].Trim(),  //tasa
+                                                                       /* parametros[14], */ //tasa
+                                                                    });
+                                }
+                                //oImpFiscal.Item("1002", extension, new string[] {
+                                //               "0",  // 1 Descripcion adicional 1
+                                //                "2",  // 2 Descripcion adicional 2
+                                //                "2",  // 3 Descripcion adicional 3
+                                //               "1",  // 4 Descripcion adicional 4
+                                //               "1",  // 5 Descripcion adicional 5
+                                //                "2",  // 6 Descripcion adicional 6
+                                //                "2",  // 7 Descripcion adicional 7
+                                //                ////"2",  //  Descripcion adicional 8
+                                //                "1",  // 8 Descripcion adicional 9
+                                //                "2",  // 9 Descripcion item
+                                //                "2",/* 10 parametros[11],*/  // Descripcion adiciona 1
+                                //                "300", //11 cantidad
+                                //                "2500",  //12 precio unitario
+                                //                "0",  // 13 tasen de itbis
+                                //            });
+                                //}
+                                catch (Exception ex)
+                                {
+                                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                }
+                                break;
+
+                            case "SUBTOTAL_CF":
+                                try
+                                {
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    string extension = "";
+                                    extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                    extension = extension.PadLeft(16, '0');
+                                    extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+
+                                  
+                                    oImpFiscal.SubTotal("1003", extension);
+                                }
+                                catch (Exception ex)
+                                {
+                                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                                    //if (oImpFiscal == null)
+                                    //    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    //oImpFiscal.CancelarDocumento();
+
+                                }
+                                break;
+
+                            case "DESC_REC_CF":
+                                try
+                                {
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    string extension = "";
+                                    switch (parametros[0])
+                                    {
+                                        case "0":
+                                            extension = "0";
+                                            break;
+                                        case "1":
+                                            extension = "1";
+                                            break;
+                                    }
+
+                                    extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                    extension = extension.PadLeft(15, '0');
+                                    extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+                                    oImpFiscal.DescuentoRecargo("1004", extension, new string[] {
+                                                    parametros[1], //descripcion
+                                                    parametros[2],  //monto
+
+                                                    });
+
+                                }
+                                catch (Exception ex)
+                                {
+                                    //MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    oImpFiscal.CancelarDocumento();
+                                }
+                                break;
+
+                            case "PAGO_CF":
+                                try
+                                {
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    string extension = "";
+                                    switch (parametros[0])
+                                    {
+                                        case "0":
+                                            extension = "0";
+                                            break;
+                                        case "1":
+                                            extension = "1";
+                                            break;
+                                    }
+
+                                    //switch (parametros[1])
+                                    //{
+                                    //    case "0":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "1":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "2":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "3":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "4":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "5":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "6":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+
+                                    //    case "7":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "8":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "9":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+                                    //    case "10":
+                                    //        extension = extension.PadLeft(15, '0');
+                                    //        break;
+
+
+                                    //}
+                                    extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                    extension = extension.PadLeft(15, '0');
+                                    extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+                                   string pago = Math.Ceiling(decimal.Parse(parametros[2].ToString().Substring(0, parametros[2].Length - 2) + "." + parametros[2].Substring(parametros[2].Length - 2, 2))).ToString();
+
+                                        oImpFiscal.Pago("1005", extension, new string[] {
+                                            parametros[1],
+                                            pago.Length < parametros[2].Length ? pago +"00" :pago,   /* .Insert(3,"0")*/
+                                            parametros[3],
+                                            parametros[4],
+                                            parametros[5]});
+                                }
+                                catch (Exception ex)
+                                {
+                                    //MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    oImpFiscal.CancelarDocumento();
+                                }
+                                break;
+
+                            case "CERRAR_CF":
+                                try
+                                {
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    string extension = "";
+                                    switch (parametros[0])
+                                    {
+                                        case "0":
+                                            extension = "0";
+                                            break;
+                                        case "1":
+                                            extension = "1";
+                                            break;
+                                    }
+                                    extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                    extension = extension.PadLeft(16, '0');
+                                    extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+                                    oImpFiscal.Cerrar("1006", extension, new string[] {
+                                            parametros[1].Trim(), //Numero linea de reemplazo #1
+                                            parametros[2], //Descripcion de reemplazo 1
+                                            parametros[3].Trim(), //Numero linea de reemplazo 2
+                                            parametros[4], //Descripcion de reemplazo 2
+                                            parametros[5].Trim(), //numero linea de reemplazo 3
+                                            parametros[6], //Descripcion de reemplazo 3
+                                        });
+                                }
+
+
+                                //    oImpFiscal.Cerrar("1006", extension, new string[] {
+                                //            "1",
+                                //            "2",
+                                //            "3",
+                                //            "4",
+                                //            "5",
+                                //            "6",
+                                //            });
+                                //}
+                                catch (Exception ex)
+                                {
+                                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                    if (oImpFiscal == null)
+                                        oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                    oImpFiscal.CancelarDocumento();
+                                };
+                                break;
+                                case "REPORTE_Z":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        switch (parametros[0])
+                                        {
+                                            case "0":
+                                                extension = "0";
+                                                break;
+                                            case "1":
+                                                extension = "1";
+                                                break;
+
+                                            case "2":
+                                                extension = "2";
+                                                break;
+                                        }
+
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        extension = extension.PadLeft(15, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+                                        oImpFiscal.ReporteZ("0801", extension);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        //if (oImpFiscal == null)
+                                        //    oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        //oImpFiscal.CancelarDocumento();
+                                    }
+                                    break;
+
+                            }
+
+                           
+                    }
+                }
+                sw.Close();
+            }
+
+
+                //move();
+               if (File.Exists(path)) {
+
+                    File.Delete(path);
+                } else
+                {
+                    
+                    File.Move(archivo, path);
+
+                }
+
+            }
+        }
+
+    public void move()
+        {
+            //carpeta de entrada 
+            string path1 = @"C:\Users\ceodev\Documents\IPF\IPFISCAL_IN\OINV-22044.txt";
+            //string path = Path.GetExtension(path1);
+            string path = @"C:\Users\ceodev\Documents\IPF\IPFISCAL_OUT\OINV-22044.txt";
+            //FileStream nw = new FileStream(path1,fi);
+            File.Move(path1, path);
+            //if (File.Open() == )
+            //{
+
+            //}
+            //if (!Directory.Exists(path))
+            //{
+                  
+            //        Directory.Move(path1, path1);
+            //        //Console.WriteLine("File Moved!");
+                
+              
+            //} else
+            //{
+            //    MessageBox.Show("Error moviendo el archivo");
+            //}
+        }
+
+        private void FrmPF_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            try
+            {
+                rk.SetValue("LabelPrinter", comboBoxPrinterLabels.Text);
+                rk.SetValue("InvoicePrinter", comboBoxPrinterInvoice.Text);
+                rk.SetValue("DispatchPrinter", comboBoxPrinterDispatch.Text);
+                rk.SetValue("QuotationPrinter", comboBoxPrinterQuotation.Text);
+                rk.SetValue("PrintFormat", comboBoxPrintFormat.Text);
+                rk.SetValue("ComPort", comboBoxComPort.Text);
+                rk.SetValue("ComSpeed", comboBoxComSpeed.Text);
+
+                if (comboBoxCajonDinero.SelectedItem != null)
+                    rk.SetValue("CajonDinero", ((MyComboBoxItem)comboBoxCajonDinero.SelectedItem).Value);
+
+                if (oImpFiscal != null)
+                    oImpFiscal.Printer.ClosePort();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
+        }
+
+        private void FrmPF_Resize(object sender, EventArgs e)
+        {
+
+
+            if (this.WindowState == FormWindowState.Minimized)
+            {
+                //ocultar el formulario 
+                this.Hide();
+
+                //icono visible 
+                notifyIcon1.Visible = true;
+
+                notifyIcon1.BalloonTipText = "Minimizado en el area de notificaciones";
+                notifyIcon1.BalloonTipTitle = "Impresora Fiscal";
+                notifyIcon1.BalloonTipIcon = ToolTipIcon.Info;
+                notifyIcon1.ShowBalloonTip(5000); // 5 segundos
+
+
+            }
+
+        }
+
+        private void notifyIcon1_MouseDoubleClick(object sender, MouseEventArgs e)
+        {
+            //Formulario visible 
+            this.Show();
+
+            this.WindowState = FormWindowState.Normal;
+
+            //ocultame el icono 
+
+            notifyIcon1.Visible = false;
+
+
+        }
+
+      
+
+        private void timer1_Tick(object sender, EventArgs e)
+        {
+            //Imprimiendo();
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        { try
+            {
+                string directory = "C:\\LVentas\\" + dateTimePickerCierreZFrom.Value.Year.ToString() + "\\" + System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(dateTimePickerCierreZFrom.Value.Month);
+                string fileName = "LM" + dateTimePickerCierreZFrom.Value.ToString("yyMM") + ".ImpresoraFiscal";
+                if (GenerarLibroMensual(directory, directory + "\\" + fileName, null))
+                {
+                    MessageBox.Show("Libro mensual generado con éxito.", "Generación completa", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    System.Diagnostics.Process.Start(directory);
+                }
+                else
+                {
+                    MessageBox.Show("No pudo generar el libro mensual. Intente la generación con la herramienta oficial de la DGII.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
+        }
+
+        private void button1_Click_1(object sender, EventArgs e)
+        {
+            string strDesde = dateTimePickerCierreZFrom.Value.ToString("ddMMyyyy");
+            string strHasta = dateTimePickerCierreZTo.Value.ToString("ddMMyyyy");
+            //string fileName = Environment.GetFolderPath(Environment.SpecialFolder.Desktop) + "\\Libro de Ventas\\" + strDesde + "-" + strHasta + ".txt";
+
+            try
+            {
+                if (!System.IO.Directory.Exists("C:\\LVentas"))
+                    System.IO.Directory.CreateDirectory("C:\\LVentas");
+
+                if (verificarConexion(comboBoxComPort.Text.Replace("COM", "")))
+                {
+                    DateTime fecha = dateTimePickerCierreZFrom.Value.Date;
+                    List<DateTime> fechas = new List<DateTime>();
+                    List<DateTime> fechasNoGeneradas = new List<DateTime>();
+                    while (fecha <= dateTimePickerCierreZTo.Value.Date)
+                    {
+                        fechas.Add(fecha);
+                        fecha = fecha.AddDays(1);
+                    }
+
+                    DialogResult dr = MessageBox.Show(
+                        string.Format("Se descargarán los libros diarios de venta de la impresora, correspondientes a los días del {0} al {1}.", fechas[0].ToShortDateString(), fechas[fechas.Count - 1].ToShortDateString()),
+                        "Continuar?",
+                        MessageBoxButtons.OKCancel,
+                        MessageBoxIcon.Question);
+                    if (dr == System.Windows.Forms.DialogResult.Cancel)
+                        return;
+
+                    foreach (DateTime fechaDescarga in fechas)
+                    {
+                        if (!LeerLibroDiario(fechaDescarga.ToString("ddMMyyyy"), "file", "ext"))
+                        {
+                            fechasNoGeneradas.Add(fechaDescarga);
+                        }
+                    }
+
+                    if (fechasNoGeneradas.Count > 0)
+                    {
+                        List<string> lstFechasNoGeneradas = new List<string>();
+                        foreach (DateTime fechaNG in fechasNoGeneradas) lstFechasNoGeneradas.Add(fechaNG.ToShortDateString());
+                        MessageBox.Show("Los siguientes libros diarios no se generaron: " + string.Join(", ", lstFechasNoGeneradas.ToArray()) + "\r\n\r\nEs posible que estos días no hubo ventas.", "Libros no generados", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+                    }
+
+                    System.Diagnostics.Process.Start("C:\\LVentas");
+
+                }
+                else
+                {
+                    MessageBox.Show("No pudo establecer la conexión con la impresora fiscal en el puerto: " + comboBoxComPort.Text.Replace("COM", ""), "Verificar conexión", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
+        }
+
+        private void buttonImpFiscConfigureHeader_Click(object sender, EventArgs e)
+        {
+            //carpeta de entrada 
+            string path1 = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_IN\\";
+
+            //salida de facturas fiscal
+            string path = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_OUT\\";
+            path += "ImpresoraFiscal-" + DateTime.Now.ToString("yyyy-MM-dd HH-mm") + /*+ "-pid" + System.Diagnostics.Process.GetCurrentProcess().Id +*/ ".txt";
+
+
+            //string path = Path.GetExtension(path1);
+            //string path = @"C:\Users\ceodev\Documents\IPF\IPFISCAL_OUT\";
+
+
+            //DirectoryInfo Di = new DirectoryInfo(@"C:\Users\ceodev\Documents\IPF\IPFISCAL_IN\", "*.txt");
+            //string arc = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)) + "\\IPF\\IPFISCAL_IN\\";
+            string arch = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\IPF\\IPFISCAL_IN\\ + ";
+
+
+            string[] archivos = Directory.GetFiles(path1);
+            //string[] archivos = Directory.GetFiles(@"C:\Users\ceodev\Documents\IPF\IPFISCAL_IN\", "*.txt");
+
+
+            foreach (string item in archivos)
+            {
+                string archivo = item;
+
+                if (archivo == null)
+
+                    MessageBox.Show("No existe factura para imprimir en la carpeta", "Error", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+
+
+                //string archivo = Path.GetExtension(path1);
+
+                //string Strget = Path.GetFileName(path);
+                if (File.Exists(archivo))
+                {
+                    //File.Move(path1, path);
+                    StreamReader sw = new StreamReader(archivo);
+                    string line = "";
+                    while (line != null)
+                    {
+                        line = sw.ReadLine();
+                        if (line != null)
+                        {
+                            string lineas = line;
+
+
+                            //string[] value = lineas.Split(',');
+                            Regex r = new Regex("^<([A-Z_]+)\\s*,?(.*)>$");
+                            if (!r.IsMatch(line))
+                                continue;
+
+                            MatchCollection mc = r.Matches(line);
+
+                            //string comando = r.Matches(line)[0].Groups[1].Value.Split(',');
+                            string comando = mc[0].Groups[1].Value;
+                            string[] parametros = mc[0].Groups[2].Value.Split(',');
+                            //string[] parametros = r.Matches(line)[0].Groups[1].Value.Split(',');
+                            switch (comando)
+                            {
+                               
+                                case "OBTENER_ENCABEZADO":
+                                    try
+                                    {
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        string extension = "";
+                                        switch (parametros[0])
+                                        {
+                                            case "0":
+                                                extension = "0";
+                                                break;
+                                    
+                                        }
+
+                                        extension = extension.PadLeft(3, '0'); // bits 3, 4, 5
+                                        extension = extension.PadLeft(15, '0');
+                                        extension = Convert.ToUInt16(extension, 2).ToString().PadLeft(4, '0');
+
+                                        oImpFiscal.ConfigEnca("0508", extension, new string[] {parametros[1] });
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        //MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        if (oImpFiscal == null)
+                                            oImpFiscal = new ImpresoraFiscal(comboBoxComPort.Text, (EpsonFPHostControlX.TxBaudRate)((MyComboBoxItem)comboBoxComSpeed.SelectedItem).Value, htConfig);
+                                        oImpFiscal.CancelarDocumento();
+                                    }
+                                    break;
+
+                            }
+
+
+                        }
+                    }
+                    sw.Close();
+                }
+
+
+                //move();
+                if (File.Exists(path))
+                {
+
+                    File.Delete(path);
+                }
+                else
+                {
+
+                    File.Move(archivo, path);
+
+                }
+
+            }
+        }
+    }
+
+}
