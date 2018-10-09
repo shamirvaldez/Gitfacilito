@@ -1,0 +1,108 @@
+ public int[] cola;
+        public int First;
+        public int last;
+        public int n;
+
+        public Cola()
+        { 
+            //ruta carperta archivo imprimir 
+            string Strfile = "C:\\Users\\ceodev\\AppData\\Local\\CEO_Consultoría_SRL\\IFiscal" + ".txt";
+
+            //obteniendo archivo de la carpeta 
+            string Strget = Path.GetFileName(Strfile);
+        }
+
+        public void fila(int max)
+        {
+            First = -1;
+            last = -1;
+            n = max;
+            cola = new int[max];
+
+        }
+
+        public Boolean cola_full()
+        {
+            if (last == n -1)
+            {
+                return true;
+
+            }else
+            {
+                return false;
+            }
+        }
+
+
+        public Boolean cola_empty()
+        {
+            if (First == n - 1)
+            {
+                return true;
+
+            }else
+            {
+                return false;
+            }
+
+        }
+
+        public void add_colar(int n)
+        {
+            if (cola_full() == true)
+            {
+                MessageBox.Show("llena");
+            }
+            else
+            {
+                last++;
+                cola[last] = n;
+                if (last == 0)
+                {
+
+                    First = 0;
+                }
+            }
+        }
+        public int del_Cola()
+        {
+            int n=-  666;
+
+            if (cola_empty() == true)
+            {
+                MessageBox.Show("cola de impresion vacia ");
+
+            }
+
+            else
+            {
+                n = cola[First];
+                if (First == last)
+                {
+                    First =- 1;
+                    last = -1;
+                }
+                else
+                {
+                     First++; 
+                }
+
+                
+            }
+            return n;
+        }
+
+        public void agregando()
+        {
+            //n = numero de archivo;
+             //add  cola  se agregar numero de archivos
+             //
+
+        }
+
+        public void eliminando()
+        {
+            //n = numero de archivo;
+            //del cola 
+            // if n == - 666 sin valor de lo contrario salio + n
+        }
